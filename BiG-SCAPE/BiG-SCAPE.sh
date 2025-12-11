@@ -1,46 +1,74 @@
 #!/bin/bash
+set -euo pipefail
 
 # Paths
-WORKDIR=/home/student.aau.dk/gu57sy/Working_Directory
-ANTI=$WORKDIR/antismash_raw
-OUT=$WORKDIR/bigscape_output
-PFAM=/home/student.aau.dk/gu57sy/Working_Directory/PfamDB/Pfam-A.hmm
+WORKDIR="/home/student.aau.dk/gu57sy/Working_Directory" # Set as your own WD
+ANTI="$WORKDIR/antismash_raw" # Upload all your data to a directory called antismash_raw
+BGCS="$WORKDIR/bgc_input"
+OUT="$WORKDIR/bigscape_results"
+PFAM="$WORKDIR/PfamDB/Pfam-A.hmm"
+MIBIG_IN="$WORKDIR/mibig_input/mibig_gbk_4.0" 
 
 # CPUs
 CORES=8
 
 # Create output directory
-mkdir -p $OUT
+mkdir -p "$OUT"
+mkdir -p "$BGCS"
 
-# Load conda commands
+# Load conda and activate environment
 eval "$(conda shell.bash hook)"
-conda activate bigscape
+BIGSCAPE_ENV="bigscape_env"   # brug det faktiske navn på dit miljø
+conda activate "$BIGSCAPE_ENV"
 
-# Activate BiG-SCAPE environment
-BIGSCAPE_ENV="bigscape"
-conda activate $BIGSCAPE_ENV
+# Check Pfam database
+if [ ! -f "$PFAM.h3i" ]; then
+    echo "Pfam database is not indexed. Run 'hmmpress $PFAM' first."
+    exit 1
+fi
 
 echo "=== Unzipping antiSMASH files ==="
-cd $ANTI
+cd "$ANTI"
 for z in *.zip; do
     [ -e "$z" ] || continue
     outdir="${z%.zip}"
     if [ ! -d "$outdir" ]; then
         echo "Unzipping $z ..."
-        unzip "$z" -d "$outdir"
+        unzip -q "$z" -d "$outdir"
     else
         echo "$outdir already exists - skipping unzip"
     fi
 done
 
-echo "=== Running BiG_SCAPE ==="
+# Collect gbk files into bgc_input
+echo "=== Collecting and renaming gbk files into $BGCS ==="
+rm -f "$BGCS"/*.gbk
+find "$ANTI" -type f -name "*.gbk" | while read filepath; do
+    foldername=$(basename "$(dirname "$filepath")")
+    filename=$(basename "$filepath")
+    cp "$filepath" "$BGCS/${foldername}_${filename}"
+done
 
-# Run Big-SCAPE
-bigscape cluster \
-    --input-dir $ANTI/*/ \
-    --output-dir $OUT \
-    --cores $CORES \
-    --input-mode recursive \
-    --pfam-path $PFAM \
-    --verbose
+# Running BiG-SCAPE
+for cutoff in 0.3 0.5 0.7; do
+    echo "=== Running BiG-SCAPE ==="
+    bigscape cluster \
+        --input-dir "$BGCS" \
+        --input-mode flat \
+        --output-dir "$OUT/cluster_c${cutoff}" \
+        --cores "$CORES" \
+        --pfam-path "$PFAM" \
+        --gcf-cutoffs $cutoff \
+        --verbose
+done
 
+# Run BiG-SCAPE query against MIGBiG
+bigscape query \
+    --input-dir "$BGCS" \
+    --reference-dir "$MIBIG_IN" \
+    --output-dir "$OUT/query_results" \
+    --cores "$CORES" \
+    --pfam-path "$PFAM" \
+    --verbose 
+
+echo "=== Summary of results ==="
