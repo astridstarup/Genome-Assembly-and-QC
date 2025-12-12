@@ -49,6 +49,18 @@ find "$ANTI" -type f -name "*.gbk" | while read filepath; do
     cp "$filepath" "$BGCS/${foldername}_${filename}"
 done
 
+# Run BiG-SCAPE dereplicate
+echo "=== Running BiG-SCAPE dereplicate ==="
+DEREP="$OUT/derep_output"
+mkdir -p "$DEREP"
+bigscape dereplicate \
+    --input-dir "$BGC" \
+    --input-mode flat \
+    --output-dir "$DEREP" \
+    --cores "$CORES" \
+    --pfam-path "$PFAM" \
+    --verbose
+
 # Running BiG-SCAPE
 for cutoff in 0.3 0.5 0.7; do
     echo "=== Running BiG-SCAPE ==="
@@ -71,4 +83,23 @@ bigscape query \
     --pfam-path "$PFAM" \
     --verbose 
 
+# Run BiG-SCAPE benchmark
+echo "=== Running BiG-SCAPE benchmark ==="
+bigscape benchmark \
+    --input-dir "$DEREP" \
+    --reference-dir "$MIBIG_IN" \
+    --output-dir "$OUT/benchmark_results" \
+    --cores "$CORES" \
+    --pfam-path "$PFAM"
+    --verbose
+
+# Summary
 echo "=== Summary of results ==="
+echo "Original BGC count: $(ls $BGCS/*.gbk | wc -l)"
+echo "Dereplicated BGC count: $(ls $DEREP/*.gbk | wc -l)"
+for cutoff in 0.3 0.5 0.7; do
+    gcf_count=$(find "$OUT/cluster_derep_c${cutoff}" -type f -name "*.tsv" | wc -l)
+    echo "Cutoff $cutoff: $gcf_count GCF files"
+done
+mibig_count=$(find "$OUT/query_derep_results" -type f -name "*.tsv" | wc -l)
+echo "MIBiG query: $mibig_count match files"
